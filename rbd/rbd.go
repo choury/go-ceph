@@ -5,6 +5,7 @@ package rbd
 // #include <stdlib.h>
 // #include <rados/librados.h>
 // #include <rbd/librbd.h>
+// #include "rbd_list_watchers.h"
 import "C"
 
 import (
@@ -68,6 +69,14 @@ type Image struct {
 type Snapshot struct {
 	image *Image
 	name  string
+}
+
+//obj_watch_t
+type Obj_watch_t struct {
+	Addr       string `json:"addr"`
+	Watcher_id int64  `json:"id"`
+	Cookie     uint64 `json:"cookie"`
+	Timeout    uint32 `json:"timeout"`
 }
 
 //
@@ -518,30 +527,30 @@ func (image *Image) ListLockers() (tag string, lockers []Locker, err error) {
 		nil, (*C.size_t)(&c_clients_len),
 		nil, (*C.size_t)(&c_cookies_len),
 		nil, (*C.size_t)(&c_addrs_len))
-	
-	// no locker held on rbd image when either c_clients_len, 
-	// c_cookies_len or c_addrs_len is *0*, so just quickly returned 
-	if int(c_clients_len) == 0 || int(c_cookies_len) == 0 || 
-		int(c_addrs_len) ==0 {
+
+	// no locker held on rbd image when either c_clients_len,
+	// c_cookies_len or c_addrs_len is *0*, so just quickly returned
+	if int(c_clients_len) == 0 || int(c_cookies_len) == 0 ||
+		int(c_addrs_len) == 0 {
 		lockers = make([]Locker, 0)
-		return "", lockers, nil 
+		return "", lockers, nil
 	}
 
 	tag_buf := make([]byte, c_tag_len)
 	clients_buf := make([]byte, c_clients_len)
 	cookies_buf := make([]byte, c_cookies_len)
 	addrs_buf := make([]byte, c_addrs_len)
-	
+
 	c_locker_cnt = C.rbd_list_lockers(image.image, &c_exclusive,
 		(*C.char)(unsafe.Pointer(&tag_buf[0])), (*C.size_t)(&c_tag_len),
 		(*C.char)(unsafe.Pointer(&clients_buf[0])), (*C.size_t)(&c_clients_len),
 		(*C.char)(unsafe.Pointer(&cookies_buf[0])), (*C.size_t)(&c_cookies_len),
 		(*C.char)(unsafe.Pointer(&addrs_buf[0])), (*C.size_t)(&c_addrs_len))
-	
-	// rbd_list_lockers returns negative value for errors 
+
+	// rbd_list_lockers returns negative value for errors
 	// and *0* means no locker held on rbd image.
-	// but *0* is unexpected here because first rbd_list_lockers already 
-	// dealt with no locker case 
+	// but *0* is unexpected here because first rbd_list_lockers already
+	// dealt with no locker case
 	if int(c_locker_cnt) <= 0 {
 		return "", nil, RBDError(int(c_locker_cnt))
 	}
@@ -871,4 +880,24 @@ func (snapshot *Snapshot) Set() error {
 	defer C.free(unsafe.Pointer(c_snapname))
 
 	return GetError(C.rbd_snap_set(snapshot.image.image, c_snapname))
+}
+
+func (image *Image) List_watchers() ([]Obj_watch_t, error) {
+	var watch_list *C.obj_watch_list_t
+	ret := C.rbd_list_watchers(C.rados_ioctx_t(image.ioctx.Pointer()),
+		image.image, C.CString(image.name), &watch_list)
+	if ret < 0 {
+		return nil, RBDError(int(ret))
+	}
+	watchers := []Obj_watch_t{}
+	for w := watch_list; w != nil; w = w.next {
+		watchers = append(watchers, Obj_watch_t{
+			C.GoString(&w.watcher.addr[0]),
+			int64(w.watcher.watcher_id),
+			uint64(w.watcher.cookie),
+			uint32(w.watcher.timeout_seconds),
+		})
+	}
+	C.rbd_watch_list_free(watch_list)
+	return watchers, nil
 }
