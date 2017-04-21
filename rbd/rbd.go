@@ -1,6 +1,6 @@
 package rbd
 
-// #cgo LDFLAGS: -lrbd
+// #cgo LDFLAGS: -lrbd -lrados
 // #include <errno.h>
 // #include <stdlib.h>
 // #include <rados/librados.h>
@@ -12,9 +12,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/ceph/go-ceph/rados"
 	"io"
 	"unsafe"
+
+	"github.com/ceph/go-ceph/rados"
 )
 
 //
